@@ -1,4 +1,7 @@
 import logging
+import os
+from threading import Thread
+from flask import Flask
 from collections import defaultdict
 from datetime import datetime
 from telegram import Update
@@ -10,6 +13,18 @@ user_data = defaultdict(lambda: {"balance": 0.0, "transactions": []})
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
+# Маленький веб-сервер, чтобы Render не выключал сервис
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Бот работает!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
+
+# --- Обработчики команд Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💰 Привет! Я бот для учёта доходов и расходов.\n\n"
@@ -86,6 +101,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 def main():
+    # Создаём приложение Telegram
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add_income))
@@ -93,6 +109,8 @@ def main():
     app.add_handler(CommandHandler("balance", balance))
     app.add_handler(CommandHandler("history", history))
 
+    # Запускаем веб-сервер в соседнем потоке
+    Thread(target=run_web).start()
     print("Бот запущен...")
     app.run_polling()
 
