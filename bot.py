@@ -8,7 +8,7 @@ from calendar import monthrange
 from flask import Flask
 from collections import defaultdict
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 BOT_TOKEN = "8320620850:AAE5TK8M2lYJrs9NJaB-uxbjT1S3jJUsSBM"
 ADMIN_ID = 1908770107
@@ -19,9 +19,14 @@ user_data = defaultdict(lambda: {
     "salary": None,
     "advance": None,
     "last_surprise": None,
-    "profile": {"first_name": "", "username": "", "platform": "unknown"},
+    "profile": {
+        "first_name": "",
+        "username": "",
+        "platform": "unknown",
+        "platform_locked": False
+    },
     "last_active": None,
-    "last_cron_sent": None   # время последнего cron-сообщения
+    "last_cron_sent": None
 })
 
 telegram_app = None
@@ -36,15 +41,12 @@ def home():
 
 @web_app.route('/cron')
 def cron():
-    """Вызывается cron-job.org каждые 10 минут, чтобы Render не засыпал.
-    Рассылает сообщение не чаще раза в сутки."""
     if telegram_app is None:
         return "bot not ready", 503
     now = datetime.now()
     for uid in list(user_data.keys()):
         data = user_data[uid]
         last_sent = data.get("last_cron_sent")
-        # Отправляем сообщение, если прошло больше 23 часов
         if not last_sent or (now - last_sent).total_seconds() > 23 * 3600:
             try:
                 loop = asyncio.new_event_loop()
@@ -123,10 +125,16 @@ JOKES = [
     "— Банкомат спросил: «Внести или снять?» Я ответил: «Просто поговорить»."
 ]
 
-NOW = datetime.now
+TIPS = [
+    "💡 Откладывай 10% дохода сразу после получения — это незаметно, но эффективно.",
+    "💡 Веди учёт даже мелких трат: кофе и шоколадки съедают бюджет.",
+    "💡 Перед покупкой спроси себя: «Оно мне правда нужно?» и подожди 24 часа.",
+    "💡 Раздели расходы на обязательные и желательные — так легче экономить.",
+    "💡 Ставь финансовые цели: отпуск, подушка безопасности, инвестиции.",
+    "💡 Используй правило 50/30/20: 50% на жизнь, 30% на хотелки, 20% на сбережения."
+]
 
-def guess_platform(update: Update):
-    return 'unknown'
+NOW = datetime.now
 
 def update_user_profile(user_id, update: Update):
     user = user_data[user_id]
@@ -134,10 +142,6 @@ def update_user_profile(user_id, update: Update):
     if update.effective_user:
         user["profile"]["first_name"] = update.effective_user.first_name or ""
         user["profile"]["username"] = update.effective_user.username or ""
-    if user["profile"].get("platform", "unknown") == "unknown":
-        guessed = guess_platform(update)
-        if guessed != "unknown":
-            user["profile"]["platform"] = guessed
 
 async def maybe_surprise(user_id, app, force=False):
     data = user_data[user_id]
@@ -182,41 +186,63 @@ async def maybe_surprise(user_id, app, force=False):
     if message.strip():
         await app.bot.send_message(chat_id=user_id, text=message)
 
-# --- Обработчики команд ---
+# --- Обработчики команд (базовые) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
     await maybe_surprise(user_id, context.application)
+    profile = user_data[user_id]["profile"]
+
+    # Если платформа ещё не выбрана – предлагаем выбрать
+    if not profile.get("platform_locked"):
+        prompt = (
+            "Привет! 👋 Для начала работы нужно выбрать свою платформу:\n"
+            "/setplatform android — для Android\n"
+            "/setplatform iphone — для iPhone\n\n"
+            "После этого тебе откроются эксклюзивные команды и начнётся магия учёта! 💫"
+        )
+        await update.message.reply_text(prompt)
+        return
+
+    # Платформа уже выбрана – показываем полный список команд
+    platform = profile["platform"]
     if user_id == ADMIN_ID:
-        await update.message.reply_text(
-            "💰 Привет, хозяин! Я твой финансовый помощник.\n\n"
-            "Основные команды для всех:\n"
-            "/add 1000 Зарплата — доход\n"
-            "/spend 300 Кофе — расход\n"
-            "/balance — баланс и статистика\n"
-            "/history — последние операции\n"
-            "/setsalary 50000 15\n"
-            "/setadvance 20000 28\n"
-            "/upcoming — когда ждать выплат\n\n"
-            "Только для тебя:\n"
-            "/joke — анекдот\n"
-            "/hello — поздороваться\n"
-            "/users — кто пользуется ботом\n"
-            "/setplatform android/iphone — указать свою платформу (для статистики)"
-        )
+        text = "💰 Привет, хозяин! Я твой финансовый помощник.\n\n"
+        text += "Основные команды для всех:\n"
+        text += "/add 1000 Зарплата — доход\n"
+        text += "/spend 300 Кофе — расход\n"
+        text += "/balance — баланс и статистика\n"
+        text += "/history — последние операции\n"
+        text += "/setsalary 50000 15\n"
+        text += "/setadvance 20000 28\n"
+        text += "/upcoming — когда ждать выплат\n"
+        text += "/tips — финансовый совет\n\n"
+        text += "Только для тебя:\n"
+        text += "/joke — анекдот\n"
+        text += "/hello — поздороваться\n"
+        text += "/users — кто пользуется ботом\n"
+        text += "/reset ID — сбросить данные пользователя\n\n"
+        if platform == "iphone":
+            text += "🍏 Твои эксклюзивы:\n/airdrop /faceid /applepay"
+        else:
+            text += "🤖 Твои эксклюзивы:\n/widget /apk /multiwindow"
+        await update.message.reply_text(text)
     else:
-        await update.message.reply_text(
-            "💰 Привет! Я бот для учёта доходов и расходов.\n\n"
-            "Команды:\n"
-            "/add 1000 Зарплата — добавить доход\n"
-            "/spend 300 Кофе — добавить расход\n"
-            "/balance — баланс и статистика\n"
-            "/history — последние операции\n"
-            "/setsalary 50000 15\n"
-            "/setadvance 20000 28\n"
-            "/upcoming — когда ждать выплат\n"
-            "/setplatform android/iphone — указать свою платформу"
-        )
+        text = "💰 Привет! Я бот для учёта доходов и расходов.\n\n"
+        text += "Команды:\n"
+        text += "/add 1000 Зарплата — добавить доход\n"
+        text += "/spend 300 Кофе — добавить расход\n"
+        text += "/balance — баланс\n"
+        text += "/history — история\n"
+        text += "/setsalary 50000 15\n"
+        text += "/setadvance 20000 28\n"
+        text += "/upcoming — когда ждать выплат\n"
+        text += "/tips — финансовый совет\n"
+        if platform == "iphone":
+            text += "\n🍏 Твои уникальные команды:\n/airdrop /faceid /applepay"
+        else:
+            text += "\n🤖 Твои уникальные команды:\n/widget /apk /multiwindow"
+        await update.message.reply_text(text)
 
 async def add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -378,7 +404,13 @@ async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-# --- Команды для админа ---
+# --- Команды для всех платформ ---
+async def tips(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await update.message.reply_text(random.choice(TIPS))
+
+# --- Команды только для админа ---
 async def joke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -406,12 +438,13 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name = profile["first_name"] or "Без имени"
         username = f" (@{profile['username']})" if profile["username"] else ""
         platform = profile.get("platform", "unknown")
+        locked = "🔒" if profile.get("platform_locked") else ""
         if platform == "unknown":
             platform_str = "не указано"
         elif platform == "android":
-            platform_str = "🤖 Android"
+            platform_str = f"🤖 Android {locked}"
         elif platform == "iphone":
-            platform_str = "📱 iPhone"
+            platform_str = f"📱 iPhone {locked}"
         else:
             platform_str = platform
         last = data["last_active"]
@@ -423,9 +456,31 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+async def reset_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    try:
+        target = int(context.args[0])
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ Формат: /reset <ID пользователя>")
+        return
+    if target in user_data:
+        del user_data[target]
+        await update.message.reply_text(f"✅ Данные пользователя {target} сброшены.")
+    else:
+        await update.message.reply_text("Пользователь не найден.")
+
+# --- Выбор платформы (однократно) ---
 async def set_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
+    profile = user_data[user_id]["profile"]
+
+    if profile.get("platform_locked"):
+        await update.message.reply_text("🔒 Платформа уже выбрана и не может быть изменена.")
+        return
+
     try:
         platform = context.args[0].lower()
         if platform not in ("android", "iphone"):
@@ -433,8 +488,114 @@ async def set_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("⚠️ Формат: /setplatform android или /setplatform iphone")
         return
-    user_data[user_id]["profile"]["platform"] = platform
-    await update.message.reply_text(f"✅ Платформа установлена: {'Android' if platform == 'android' else 'iPhone'}")
+
+    profile["platform"] = platform
+    profile["platform_locked"] = True
+    await update.message.reply_text(f"✅ Платформа установлена: {'Android' if platform == 'android' else 'iPhone'}. Теперь тебе доступны эксклюзивные команды!")
+
+# --- Платформенные команды (iPhone) ---
+async def airdrop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "iphone":
+        await update.message.reply_text("🍏 Эта команда только для iPhone! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("📲 *AirDrop*: вы отправили 1 монету своему кошельку. Держите баланс в чистоте!", parse_mode="Markdown")
+
+async def faceid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "iphone":
+        await update.message.reply_text("🍏 Эта команда только для iPhone! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("🧑‍💻 *Face ID*: лицо распознано. Траты подтверждены. Хорошего дня!", parse_mode="Markdown")
+
+async def applepay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "iphone":
+        await update.message.reply_text("🍏 Эта команда только для iPhone! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("🍎 *Apple Pay*: платёж выполнен. С вас 0.00 (так и задумано). Деньги любят учёт!", parse_mode="Markdown")
+
+# --- Платформенные команды (Android) ---
+async def widget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "android":
+        await update.message.reply_text("🤖 Эта команда только для Android! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("📊 *Виджет*: баланс теперь на главном экране. Быстрый доступ к финансам!", parse_mode="Markdown")
+
+async def apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "android":
+        await update.message.reply_text("🤖 Эта команда только для Android! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("📦 *APK*: обновление установлено. Версия 2.0 — теперь с магией бюджета.", parse_mode="Markdown")
+
+async def multiwindow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform") != "android":
+        await update.message.reply_text("🤖 Эта команда только для Android! Установи платформу через /setplatform.")
+        return
+    await update.message.reply_text("🪟 *Многооконность*: история слева, баланс справа. Андроид — сила!", parse_mode="Markdown")
+
+# --- Обработчик любых текстовых сообщений (не команд) ---
+async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    profile = user_data[user_id]["profile"]
+
+    if not profile.get("platform_locked"):
+        # Платформа ещё не выбрана – намекаем
+        await update.message.reply_text(
+            "Пожалуйста, сначала выбери платформу!\n"
+            "/setplatform android или /setplatform iphone"
+        )
+        return
+
+    platform = profile["platform"]
+    if user_id == ADMIN_ID:
+        text = (
+            "🤖 Неизвестная команда. Список доступных команд:\n\n"
+            "/add сумма категория — доход\n"
+            "/spend сумма категория — расход\n"
+            "/balance — баланс\n"
+            "/history — история\n"
+            "/setsalary сумма день\n"
+            "/setadvance сумма день\n"
+            "/upcoming — когда выплаты\n"
+            "/tips — совет\n"
+            "/joke — шутка\n"
+            "/hello — привет\n"
+            "/users — список\n"
+            "/reset ID — сброс\n"
+        )
+        if platform == "iphone":
+            text += "/airdrop /faceid /applepay"
+        else:
+            text += "/widget /apk /multiwindow"
+    else:
+        text = (
+            "🤖 Неизвестная команда. Список доступных команд:\n\n"
+            "/add сумма категория — доход\n"
+            "/spend сумма категория — расход\n"
+            "/balance — баланс\n"
+            "/history — история\n"
+            "/setsalary сумма день\n"
+            "/setadvance сумма день\n"
+            "/upcoming — когда выплаты\n"
+            "/tips — совет\n"
+        )
+        if platform == "iphone":
+            text += "/airdrop /faceid /applepay"
+        else:
+            text += "/widget /apk /multiwindow"
+
+    await update.message.reply_text(text)
 
 # --- Запуск ---
 def main():
@@ -442,6 +603,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     telegram_app = app
 
+    # Базовые
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add_income))
     app.add_handler(CommandHandler("spend", add_expense))
@@ -450,10 +612,25 @@ def main():
     app.add_handler(CommandHandler("setsalary", set_salary))
     app.add_handler(CommandHandler("setadvance", set_advance))
     app.add_handler(CommandHandler("upcoming", upcoming))
+    app.add_handler(CommandHandler("tips", tips))
+
+    # Админ
     app.add_handler(CommandHandler("joke", joke))
     app.add_handler(CommandHandler("hello", hello))
     app.add_handler(CommandHandler("users", users))
+    app.add_handler(CommandHandler("reset", reset_user))
+
+    # Платформенные
     app.add_handler(CommandHandler("setplatform", set_platform))
+    app.add_handler(CommandHandler("airdrop", airdrop))
+    app.add_handler(CommandHandler("faceid", faceid))
+    app.add_handler(CommandHandler("applepay", applepay))
+    app.add_handler(CommandHandler("widget", widget))
+    app.add_handler(CommandHandler("apk", apk))
+    app.add_handler(CommandHandler("multiwindow", multiwindow))
+
+    # Текст
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
 
     Thread(target=run_web).start()
     print("Бот запущен...")
