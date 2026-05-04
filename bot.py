@@ -2,6 +2,7 @@ import logging
 import os
 import random
 import asyncio
+import signal
 from threading import Thread
 from datetime import datetime, timedelta
 from calendar import monthrange
@@ -197,30 +198,25 @@ def get_reply_keyboard(user_id):
     is_admin = (user_id == ADMIN_ID)
 
     if not locked:
-        # Кнопки выбора платформы – сразу команды
         return ReplyKeyboardMarkup(
             [["/setplatform android", "/setplatform iphone"]],
             resize_keyboard=True
         )
 
-    # Основные кнопки-команды
     main_buttons = [
         ["/add", "/spend"],
         ["/balance", "/history"],
         ["/upcoming", "/tips"]
     ]
 
-    # Платформенные эксклюзивы
     if platform == "iphone" or is_admin:
         main_buttons.append(["/airdrop", "/faceid", "/applepay"])
     if platform == "android" or is_admin:
         main_buttons.append(["/widget", "/apk", "/multiwindow"])
 
-    # Настройки
     settings_buttons = ["/setsalary", "/setadvance"]
     main_buttons.append(settings_buttons)
 
-    # Админские команды
     if is_admin:
         admin_buttons = ["/users", "/hello", "/joke", "/reset"]
         main_buttons.append(admin_buttons)
@@ -543,9 +539,9 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     global telegram_app
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     app = Application.builder().token(BOT_TOKEN).build()
-    telegram_app = app
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CommandHandler("add", add_income))
@@ -568,10 +564,13 @@ def main():
     app.add_handler(CommandHandler("apk", apk))
     app.add_handler(CommandHandler("multiwindow", multiwindow))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
+    telegram_app = app
 
-    Thread(target=run_web).start()
+    # Удаляем вебхук и запускаем polling
+    loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
+    Thread(target=run_web, daemon=True).start()
     print("Бот запущен...")
-    app.run_polling()
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
