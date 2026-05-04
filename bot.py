@@ -197,27 +197,32 @@ def get_reply_keyboard(user_id):
     is_admin = (user_id == ADMIN_ID)
 
     if not locked:
-        return ReplyKeyboardMarkup([["🤖 Android", "📱 iPhone"]], resize_keyboard=True)
+        # Кнопки выбора платформы – сразу команды
+        return ReplyKeyboardMarkup(
+            [["/setplatform android", "/setplatform iphone"]],
+            resize_keyboard=True
+        )
 
+    # Основные кнопки-команды
     main_buttons = [
-        ["➕ Доход", "➖ Расход"],
-        ["📊 Баланс", "📋 История"],
-        ["📅 Выплаты", "💡 Совет"]
+        ["/add", "/spend"],
+        ["/balance", "/history"],
+        ["/upcoming", "/tips"]
     ]
 
+    # Платформенные эксклюзивы
     if platform == "iphone" or is_admin:
-        main_buttons.append(["📲 AirDrop", "👤 Face ID", "🍎 Apple Pay"])
+        main_buttons.append(["/airdrop", "/faceid", "/applepay"])
     if platform == "android" or is_admin:
-        main_buttons.append(["📊 Виджет", "📦 APK", "🪟 Мультиокно"])
+        main_buttons.append(["/widget", "/apk", "/multiwindow"])
 
-    settings_buttons = []
-    if not locked:
-        settings_buttons.append("📱 Платформа")
-    settings_buttons += ["💼 Зарплата", "💸 Аванс"]
+    # Настройки
+    settings_buttons = ["/setsalary", "/setadvance"]
     main_buttons.append(settings_buttons)
 
+    # Админские команды
     if is_admin:
-        admin_buttons = ["👥 Пользователи", "😀 Привет", "😂 Шутка", "🔄 Сброс"]
+        admin_buttons = ["/users", "/hello", "/joke", "/reset"]
         main_buttons.append(admin_buttons)
 
     return ReplyKeyboardMarkup(main_buttons, resize_keyboard=True)
@@ -229,19 +234,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = user_data[user_id]["profile"]
 
     if not profile.get("platform_locked"):
-        prompt = "Привет! 👋 Для начала работы нужно выбрать свою платформу:\nНажми на кнопку ниже."
+        prompt = "Привет! 👋 Для начала работы выбери свою платформу:"
         await update.message.reply_text(prompt, reply_markup=get_reply_keyboard(user_id))
         return
 
     if user_id == ADMIN_ID:
-        text = "💰 Привет, хозяин! Я твой финансовый помощник. Все команды доступны на кнопках."
+        text = "💰 Привет, хозяин! Все команды на кнопках."
     else:
-        text = "💰 Привет! Я бот для учёта доходов и расходов. Просто нажимай на кнопки."
+        text = "💰 Привет! Используй кнопки для управления финансами."
     await update.message.reply_text(text, reply_markup=get_reply_keyboard(user_id))
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    await update.message.reply_text("Выберите действие:", reply_markup=get_reply_keyboard(user_id))
+    await update.message.reply_text("Выбери действие:", reply_markup=get_reply_keyboard(user_id))
 
 async def add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -384,7 +389,7 @@ async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await maybe_surprise(user_id, context.application)
     data = user_data[user_id]
     if not data["salary"] and not data["advance"]:
-        await update.message.reply_text("Сначала установите зарплату или аванс через /setsalary и /setadvice.")
+        await update.message.reply_text("Сначала установите зарплату или аванс через /setsalary и /setadvance.")
         return
     msg = "📅 Ближайшие ожидаемые поступления:\n"
     today = NOW().date()
