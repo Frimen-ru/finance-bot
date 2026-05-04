@@ -1,5 +1,14 @@
 import logging
 import os
+import random
+import asyncio
+from threading import Thread
+from datetime import datetime, timedelta
+from calendar import monthrange
+from flask import Flask
+from collections import defaultdict
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
