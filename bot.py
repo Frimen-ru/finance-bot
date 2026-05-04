@@ -9,6 +9,7 @@ from flask import Flask
 from collections import defaultdict
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
@@ -17,6 +18,7 @@ ADMIN_ID_STR = os.environ.get("ADMIN_ID")
 if not ADMIN_ID_STR:
     raise RuntimeError("ADMIN_ID не задан в переменных окружения")
 ADMIN_ID = int(ADMIN_ID_STR)
+
 user_data = defaultdict(lambda: {
     "balance": 0.0,
     "transactions": [],
@@ -66,7 +68,6 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
 
-# Вспомогательные функции, приветствия, шутки, советы – без изменений
 def next_occurrence(day: int):
     today = datetime.now().date()
     year, month = today.year, today.month
@@ -189,7 +190,6 @@ async def maybe_surprise(user_id, app, force=False):
     if message.strip():
         await app.bot.send_message(chat_id=user_id, text=message)
 
-# Генератор клавиатуры
 def get_reply_keyboard(user_id):
     profile = user_data[user_id]["profile"]
     platform = profile.get("platform", "unknown")
@@ -197,51 +197,31 @@ def get_reply_keyboard(user_id):
     is_admin = (user_id == ADMIN_ID)
 
     if not locked:
-        # Платформа не выбрана – только две кнопки
-        return ReplyKeyboardMarkup(
-            [["🤖 Android", "📱 iPhone"]],
-            resize_keyboard=True
-        )
+        return ReplyKeyboardMarkup([["🤖 Android", "📱 iPhone"]], resize_keyboard=True)
 
-    # Основные кнопки для всех
     main_buttons = [
         ["➕ Доход", "➖ Расход"],
         ["📊 Баланс", "📋 История"],
         ["📅 Выплаты", "💡 Совет"]
     ]
 
-    # Кнопки платформенных эксклюзивов
-    if platform == "iphone" or (is_admin and True):  # админу покажем все
-        iphone_buttons = []
-        if platform == "iphone" or is_admin:
-            iphone_buttons = ["📲 AirDrop", "👤 Face ID", "🍎 Apple Pay"]
-        if platform == "android" or is_admin:
-            android_buttons = ["📊 Виджет", "📦 APK", "🪟 Мультиокно"]
-        else:
-            android_buttons = []
-        if iphone_buttons:
-            main_buttons.append(iphone_buttons)
-        if android_buttons:
-            main_buttons.append(android_buttons)
-    elif platform == "android":
+    if platform == "iphone" or is_admin:
+        main_buttons.append(["📲 AirDrop", "👤 Face ID", "🍎 Apple Pay"])
+    if platform == "android" or is_admin:
         main_buttons.append(["📊 Виджет", "📦 APK", "🪟 Мультиокно"])
 
-    # Кнопка настроек
     settings_buttons = []
     if not locked:
         settings_buttons.append("📱 Платформа")
     settings_buttons += ["💼 Зарплата", "💸 Аванс"]
-    if settings_buttons:
-        main_buttons.append(settings_buttons)
+    main_buttons.append(settings_buttons)
 
-    # Админские кнопки
     if is_admin:
         admin_buttons = ["👥 Пользователи", "😀 Привет", "😂 Шутка", "🔄 Сброс"]
         main_buttons.append(admin_buttons)
 
     return ReplyKeyboardMarkup(main_buttons, resize_keyboard=True)
 
-# --------- Обработчики команд ---------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
@@ -249,14 +229,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = user_data[user_id]["profile"]
 
     if not profile.get("platform_locked"):
-        prompt = (
-            "Привет! 👋 Для начала работы нужно выбрать свою платформу:\n"
-            "Нажми на кнопку ниже."
-        )
+        prompt = "Привет! 👋 Для начала работы нужно выбрать свою платформу:\nНажми на кнопку ниже."
         await update.message.reply_text(prompt, reply_markup=get_reply_keyboard(user_id))
         return
 
-    # Показываем клавиатуру и приветствие
     if user_id == ADMIN_ID:
         text = "💰 Привет, хозяин! Я твой финансовый помощник. Все команды доступны на кнопках."
     else:
@@ -267,40 +243,105 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text("Выберите действие:", reply_markup=get_reply_keyboard(user_id))
 
-# Остальные обработчики команд оставим без изменений, только в конце добавим отправку клавиатуры? Нет, клавиатура уже есть у пользователя, она сама не пропадёт, если мы не будем её менять. Но можно в некоторых ответах также возвращать клавиатуру на случай сбоя. Упростим: клавиатура отображается постоянно, пока мы её не заменим. В обработчиках, где мы шлём просто текст, клавиатура останется прежней. Это нормально. В any_message тоже будем возвращать клавиатуру, чтобы восстановить.
-
-# Чтобы не загромождать, я приведу только те функции, которые меняются: add_income, add_expense, set_salary, set_advance, set_platform, эксклюзивы. Но можно оставить как есть, только добавить reply_markup=get_reply_keyboard(user_id) в ответы, где это уместно. Сделаем это в any_message и start. В остальных оставим без изменений — клавиатура и так видна.
-
-# Однако при нажатии кнопки «Настройки» или «Платформа» может потребоваться обновить клавиатуру. Лучше в set_platform и set_salary/advance тоже обновлять клавиатуру.
-
-# Внесём изменения в set_platform, set_salary, set_advance, tips, joke, hello, users, reset_user, эксклюзивы — добавим reply_markup.
-
-# Перепишем set_platform, чтобы после выбора платформы обновилась клавиатура.
-async def set_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
-    profile = user_data[user_id]["profile"]
-
-    if profile.get("platform_locked"):
-        await update.message.reply_text("🔒 Платформа уже выбрана и не может быть изменена.")
-        return
-
+    await maybe_surprise(user_id, context.application)
     try:
-        platform = context.args[0].lower()
-        if platform not in ("android", "iphone"):
-            raise ValueError
+        amount = float(context.args[0])
+        category = " ".join(context.args[1:]) if len(context.args) > 1 else "Без категории"
     except (IndexError, ValueError):
-        await update.message.reply_text("⚠️ Используй кнопки: /setplatform android или /setplatform iphone")
+        await update.message.reply_text("⚠️ Формат: /add <сумма> <категория>\nПример: /add 1000 Зарплата")
         return
+    user_data[user_id]["balance"] += amount
+    transaction = {
+        "type": "доход",
+        "amount": amount,
+        "category": category,
+        "date": NOW().strftime("%d.%m.%Y %H:%M")
+    }
+    user_data[user_id]["transactions"].append(transaction)
+    if amount >= 50000:
+        reaction = random.choice(["🔥 Крупное поступление! Красавчик!", "💼 Серьёзный доход. Так держать!"])
+    elif amount >= 10000:
+        reaction = random.choice(["✅ Отлично! Копилка пополняется.", "👍 Хороший плюс в бюджет."])
+    else:
+        reaction = random.choice(["➕ Мелочь, а приятно.", "📌 Записал, не потеряется."])
+    await update.message.reply_text(f"{reaction} Доход {amount:.2f} ({category}) добавлен.")
 
-    profile["platform"] = platform
-    profile["platform_locked"] = True
-    await update.message.reply_text(
-        f"✅ Платформа установлена: {'Android' if platform == 'android' else 'iPhone'}. Теперь тебе доступны эксклюзивные команды!",
-        reply_markup=get_reply_keyboard(user_id)
-    )
+async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await maybe_surprise(user_id, context.application)
+    try:
+        amount = float(context.args[0])
+        category = " ".join(context.args[1:]) if len(context.args) > 1 else "Без категории"
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ Формат: /spend <сумма> <категория>\nПример: /spend 250 Кофе")
+        return
+    user_data[user_id]["balance"] -= amount
+    transaction = {
+        "type": "расход",
+        "amount": amount,
+        "category": category,
+        "date": NOW().strftime("%d.%m.%Y %H:%M")
+    }
+    user_data[user_id]["transactions"].append(transaction)
+    if amount > 5000:
+        reaction = random.choice(["💸 Ничего себе траты! Надеюсь, оно того стоило.", "🛑 Крупный расход зафиксирован."])
+    else:
+        reaction = random.choice(["🛒 Расход учтён. Бюджет под контролем.", "📉 Минус, но ты знаешь, куда ушли деньги."])
+    await update.message.reply_text(f"{reaction} Расход {amount:.2f} ({category}) учтён.")
 
-# Аналогично для set_salary и set_advance – добавим клавиатуру
+async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await maybe_surprise(user_id, context.application)
+    data = user_data[user_id]
+    bal = data["balance"]
+    expenses_by_cat = defaultdict(float)
+    for t in data["transactions"]:
+        if t["type"] == "расход":
+            expenses_by_cat[t["category"]] += t["amount"]
+    if bal > 50000:
+        mood = "🤑 Отличный баланс! Ты на коне."
+    elif bal > 10000:
+        mood = "😊 Всё стабильно, можно жить."
+    elif bal > 0:
+        mood = "🙂 Нормально, но лучше не расслабляться."
+    elif bal == 0:
+        mood = "😐 По нулям. Пора что-то менять?"
+    else:
+        mood = "😟 Минус... Надо срочно спасать бюджет."
+    msg = f"📊 Текущий баланс: {bal:.2f}\n{mood}\n\n"
+    if expenses_by_cat:
+        msg += "Расходы по категориям:\n"
+        for cat, total in expenses_by_cat.items():
+            msg += f"  • {cat}: {total:.2f}\n"
+    else:
+        msg += "Расходов пока нет.\n"
+    if data["salary"]:
+        s = data["salary"]
+        msg += f"\n💼 Зарплата: {s['amount']:.2f}, {s['day']}-е число"
+    if data["advance"]:
+        a = data["advance"]
+        msg += f"\n💸 Аванс: {a['amount']:.2f}, {a['day']}-е число"
+    await update.message.reply_text(msg)
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await maybe_surprise(user_id, context.application)
+    transactions = user_data[user_id]["transactions"][-10:]
+    if not transactions:
+        await update.message.reply_text("📭 История пуста. Но ты можешь это исправить!")
+        return
+    msg = "📋 Последние операции:\n"
+    for t in reversed(transactions):
+        sign = "+" if t["type"] == "доход" else "-"
+        msg += f"{sign} {t['amount']:.2f} | {t['category']} | {t['date']}\n"
+    await update.message.reply_text(msg)
+
 async def set_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
@@ -337,7 +378,113 @@ async def set_advance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_reply_keyboard(user_id)
     )
 
-# В эксклюзивах разрешим админу выполнять без проверки платформы
+async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await maybe_surprise(user_id, context.application)
+    data = user_data[user_id]
+    if not data["salary"] and not data["advance"]:
+        await update.message.reply_text("Сначала установите зарплату или аванс через /setsalary и /setadvice.")
+        return
+    msg = "📅 Ближайшие ожидаемые поступления:\n"
+    today = NOW().date()
+    for name, key, emoji in [("Зарплата", "salary", "💼"), ("Аванс", "advance", "💸")]:
+        info = data.get(key)
+        if info:
+            next_date = next_occurrence(info["day"])
+            days_left = (next_date - today).days
+            if days_left == 0:
+                msg += f"\n{emoji} {name} {info['amount']:.2f} — СЕГОДНЯ! 🎉"
+            elif days_left == 1:
+                msg += f"\n{emoji} {name} {info['amount']:.2f} — завтра ({next_date.strftime('%d.%m.%Y')})"
+            else:
+                msg += f"\n{emoji} {name} {info['amount']:.2f} — {next_date.strftime('%d.%m.%Y')} (через {days_left} дн.)"
+    await update.message.reply_text(msg)
+
+async def tips(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    await update.message.reply_text(random.choice(TIPS))
+
+async def joke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    await update.message.reply_text(random.choice(JOKES))
+
+async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    update_user_profile(user_id, update)
+    await maybe_surprise(user_id, context.application, force=True)
+
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    if not user_data:
+        await update.message.reply_text("Пока никого нет.")
+        return
+    msg = "👥 Пользователи бота:\n\n"
+    for uid, data in user_data.items():
+        profile = data["profile"]
+        name = profile["first_name"] or "Без имени"
+        username = f" (@{profile['username']})" if profile["username"] else ""
+        platform = profile.get("platform", "unknown")
+        locked = "🔒" if profile.get("platform_locked") else ""
+        if platform == "unknown":
+            platform_str = "не указано"
+        elif platform == "android":
+            platform_str = f"🤖 Android {locked}"
+        elif platform == "iphone":
+            platform_str = f"📱 iPhone {locked}"
+        else:
+            platform_str = platform
+        last = data["last_active"]
+        if last:
+            last_str = last.strftime("%d.%m.%Y %H:%M")
+        else:
+            last_str = "неизвестно"
+        msg += f"• {name}{username}\n  ID: `{uid}`\n  Платформа: {platform_str}\n  Последняя активность: {last_str}\n\n"
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def reset_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    try:
+        target = int(context.args[0])
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ Формат: /reset <ID пользователя>")
+        return
+    if target in user_data:
+        del user_data[target]
+        await update.message.reply_text(f"✅ Данные пользователя {target} сброшены.")
+    else:
+        await update.message.reply_text("Пользователь не найден.")
+
+async def set_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_user_profile(user_id, update)
+    profile = user_data[user_id]["profile"]
+    if profile.get("platform_locked"):
+        await update.message.reply_text("🔒 Платформа уже выбрана и не может быть изменена.")
+        return
+    try:
+        platform = context.args[0].lower()
+        if platform not in ("android", "iphone"):
+            raise ValueError
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ Используй кнопки: /setplatform android или /setplatform iphone")
+        return
+    profile["platform"] = platform
+    profile["platform_locked"] = True
+    await update.message.reply_text(
+        f"✅ Платформа установлена: {'Android' if platform == 'android' else 'iPhone'}. Теперь тебе доступны эксклюзивные команды!",
+        reply_markup=get_reply_keyboard(user_id)
+    )
+
 async def airdrop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID and user_data[user_id]["profile"].get("platform") != "iphone":
@@ -380,7 +527,6 @@ async def multiwindow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🪟 *Многооконность*: история слева, баланс справа. Андроид — сила!", parse_mode="Markdown")
 
-# В any_message отправляем клавиатуру
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user_profile(user_id, update)
@@ -390,7 +536,6 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("Используй кнопки меню. Если что-то непонятно, нажми /start", reply_markup=get_reply_keyboard(user_id))
 
-# Регистрация обработчиков
 def main():
     global telegram_app
     app = Application.builder().token(BOT_TOKEN).build()
