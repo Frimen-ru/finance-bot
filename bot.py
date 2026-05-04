@@ -1,18 +1,13 @@
 import logging
 import os
-import random
-import asyncio
-from threading import Thread
-from datetime import datetime, timedelta
-from calendar import monthrange
-from flask import Flask
-from collections import defaultdict
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
 
-BOT_TOKEN = "8320620850:AAE5TK8M2lYJrs9NJaB-uxbjT1S3jJUsSBM"
-ADMIN_ID = 1908770107
-
+ADMIN_ID_STR = os.environ.get("ADMIN_ID")
+if not ADMIN_ID_STR:
+    raise RuntimeError("ADMIN_ID не задан в переменных окружения")
+ADMIN_ID = int(ADMIN_ID_STR)
 user_data = defaultdict(lambda: {
     "balance": 0.0,
     "transactions": [],
